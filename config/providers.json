@@ -1,0 +1,18 @@
+{
+  "serpapi": {
+    "enabled": true,
+    "priority": 1,
+    "requires_key": true
+  },
+  "nominatim": {
+    "enabled": true,
+    "priority": 1,
+    "requires_key": false,
+    "endpoint": "https://nominatim.openstreetmap.org/search"
+  },
+  "direct_crawler": {
+    "enabled": true,
+    "priority": 1,
+    "requires_key": false
+  }
+}
