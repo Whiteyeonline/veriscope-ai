@@ -7,3 +7,5 @@ google-generativeai>=0.3.0
 groq>=0.4.0
 pydantic>=2.5.0
 aiohttp>=3.9.0
+serpapi>=0.1.0
+python-dotenv>=1.0.0
