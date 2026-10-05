@@ -2,9 +2,11 @@
 app.py
 Streamlit Web Application Entrypoint
 """
-import streamlit as st
-import asyncio
 import os
+import asyncio
+
+import streamlit as st
+
 from core.orchestrator import AuditOrchestrator
 from identity.business_matcher import IdentityResolutionError
 
@@ -13,10 +15,17 @@ st.set_page_config(page_title="Local SEO Audit Engine", page_icon="🔍", layout
 st.title("🔍 Local SEO & GBP Audit Generator")
 st.caption("Generate zero-cost, customer-ready executive PDF audits in seconds.")
 
-# Read Keys from secrets or environment
-serpapi_key = st.secrets.get("SERPAPI_API_KEY", os.getenv("SERPAPI_API_KEY", ""))
-gemini_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
-groq_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
+try:
+    secrets = st.secrets
+except Exception:
+    secrets = {}
+
+serpapi_key = secrets.get("SERPAPI_API_KEY", os.getenv("SERPAPI_API_KEY", "")) if hasattr(secrets, "get") else os.getenv("SERPAPI_API_KEY", "")
+gemini_key = secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", "")) if hasattr(secrets, "get") else os.getenv("GEMINI_API_KEY", "")
+groq_key = secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", "")) if hasattr(secrets, "get") else os.getenv("GROQ_API_KEY", "")
+
+if not any([serpapi_key, gemini_key, groq_key]):
+    st.info("No API keys detected. The app will generate a demo-quality PDF using local fallback logic so the workflow still works.")
 
 with st.form("audit_form"):
     col1, col2 = st.columns(2)
@@ -39,13 +48,22 @@ if submit:
         st.error("Please fill in all required fields marked with *")
     else:
         payload = {
-            "name": name, "category": category, "locality": locality,
-            "city": city, "country": country, "primary_keyword": primary_kw,
-            "website": website, "maps_url": maps_url, "language": language
+            "name": name,
+            "category": category,
+            "locality": locality,
+            "city": city,
+            "country": country,
+            "primary_keyword": primary_kw,
+            "website": website,
+            "maps_url": maps_url,
+            "language": language,
+            "phone": ""
         }
 
         orchestrator = AuditOrchestrator(
-            serpapi_key=serpapi_key, gemini_key=gemini_key, groq_key=groq_key
+            serpapi_key=serpapi_key,
+            gemini_key=gemini_key,
+            groq_key=groq_key
         )
 
         with st.status("Generating Audit...", expanded=True) as status:
@@ -61,9 +79,11 @@ if submit:
                         file_name=os.path.basename(pdf_path),
                         mime="application/pdf"
                     )
-            except IdentityResolutionError as e:
+
+                st.success(f"Report saved to: {pdf_path}")
+            except IdentityResolutionError as exc:
                 status.update(label="⚠️ Verification Needed", state="error")
-                st.warning(str(e))
-            except Exception as e:
+                st.warning(str(exc))
+            except Exception as exc:
                 status.update(label="❌ Audit Failed", state="error")
-                st.error(f"Error during execution: {str(e)}")
+                st.error(f"Error during execution: {str(exc)}")
