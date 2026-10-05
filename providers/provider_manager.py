@@ -7,6 +7,7 @@ from core.cache import SQLiteCache
 from providers.serpapi import SerpApiProvider
 from providers.website import WebsiteCrawlerProvider
 
+
 class ProviderManager:
     def __init__(self, serpapi_key: Optional[str] = None):
         self.cache = SQLiteCache()
@@ -25,8 +26,15 @@ class ProviderManager:
         return data
 
     async def crawl_website(self, url: Optional[str]) -> Dict[str, Any]:
-        if not url:
-            return {"available": False}
+        if not url or not str(url).strip():
+            return {
+                "available": False,
+                "reason": "No website URL provided",
+                "is_https": False,
+                "has_local_schema": False,
+                "page_load_ms": 0,
+                "status_code": 0
+            }
         
         cache_key = f"web_crawl_{url}"
         cached = self.cache.get(cache_key)

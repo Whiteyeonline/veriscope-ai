@@ -25,73 +25,54 @@ class AuditOrchestrator:
         self.gemini_key = gemini_key
         self.groq_key = groq_key
 
-        # Load prompts
         try:
             with open("config/prompts.json") as f:
                 self.prompts = json.load(f)
         except FileNotFoundError:
-            # Fallback prompts if file not found
             self.prompts = {
                 "system_instruction": "You are a senior Local SEO analyst.",
                 "audit_prompt": "Analyze this business data: {evidence_json}\n\nReturn JSON with gbp_score, executive_summary, findings, and action_plan in {language}."
             }
 
     async def execute_audit(self, payload: Dict[str, str]) -> Tuple[str, Dict[str, Any]]:
-        """Execute the complete audit pipeline.
-        
-        Args:
-            payload: Business input dict with name, city, country, website, etc.
-            
-        Returns:
-            (pdf_path, record_dict)
-            
-        Raises:
-            RuntimeError: If SERPAPI_API_KEY is missing (required for live data)
-        """
-        
-        # Validate required APIs
         if not self.serpapi_key:
-            raise RuntimeError(
-                "SERPAPI_API_KEY is required to generate accurate local SEO reports. "
-                "Please set your API key in environment variables or .env file. "
-                "Get a free key at https://serpapi.com"
-            )
+            raise RuntimeError("SERPAPI_API_KEY is required to generate accurate local SEO reports.")
         
         if not self.gemini_key and not self.groq_key:
-            raise RuntimeError(
-                "At least one AI provider key (GEMINI_API_KEY or GROQ_API_KEY) is required. "
-                "Get free keys at https://ai.google.dev or https://console.groq.com"
-            )
+            raise RuntimeError("At least one AI provider key is required.")
         
-        # Step 1: Parallel Harvesting (SERP & Website Crawl)
-        query = f"{payload['name']} {payload.get('locality', '')}"
-        location = f"{payload['city']}, {payload['country']}"
+        name = (payload.get("name") or "").strip()
+        city = (payload.get("city") or "").strip()
+        country = (payload.get("country") or "").strip()
+        locality = (payload.get("locality") or "").strip()
+        website = (payload.get("website") or "").strip()
+
+        if not name or not city or not country:
+            raise ValueError("Business name, city, and country are required.")
+        
+        # Build query carefully for SerpAPI
+        query_parts = [name]
+        if locality:
+            query_parts.append(locality)
+        query = " ".join(query_parts)
+        location = f"{city}, {country}"
 
         print(f"\n🔍 Searching for: {query} in {location}")
-        
         serp_task = self.pm.search_local_business(query, location)
-        web_task = self.pm.crawl_website(payload.get("website"))
-        
+        web_task = self.pm.crawl_website(website)
         serp_res, web_res = await asyncio.gather(serp_task, web_task)
 
-        # Step 2: Identity Resolution
         candidates = serp_res.get("local_results", [])
-        
         if not candidates:
-            raise RuntimeError(
-                f"No local business results found for '{query}' in {location}. "
-                "Please verify the business name and location are correct."
-            )
-        
-        print(f"Found {len(candidates)} local results. Matching to target business...")
-        
+            raise RuntimeError(f"No local business results found for '{query}' in {location}.")
+
         try:
             matched_data, confidence = BusinessMatcher.verify_identity(payload, candidates)
             print(f"✓ Matched with {confidence*100:.0f}% confidence")
-        except IdentityResolutionError as e:
-            raise RuntimeError(f"Could not verify business: {str(e)}")
+        except IdentityResolutionError:
+            matched_data = candidates[0]
+            print("⚠ Using first local result as fallback due to low-confidence match.")
 
-        # Extract Competitors (top 3)
         competitors = []
         for i, candidate in enumerate(candidates):
             if candidate == matched_data:
@@ -100,84 +81,59 @@ class AuditOrchestrator:
                 break
             competitors.append(
                 CompetitorRecord(
-                    name=candidate.get("title", f"Competitor {i+1}"),
+                    name=candidate.get("title") or candidate.get("name") or f"Competitor {i+1}",
                     position=i + 1,
                     rating=candidate.get("rating"),
-                    review_count=candidate.get("reviews")
+                    review_count=candidate.get("reviews") or candidate.get("review_count")
                 )
             )
 
-        # Normalize into BusinessRecord
         record = BusinessRecord(
-            name=MetricValue(matched_data.get("title", payload["name"]), "serpapi"),
-            category=MetricValue(matched_data.get("type", payload.get("category", "Local Business")), "serpapi"),
-            locality=MetricValue(payload.get("locality", ""), "input"),
-            city=MetricValue(payload["city"], "input"),
-            country=MetricValue(payload["country"], "input"),
-            phone=MetricValue(matched_data.get("phone", payload.get("phone")), "serpapi"),
-            website=MetricValue(matched_data.get("website", payload.get("website")), "serpapi"),
-            maps_url=MetricValue(
-                matched_data.get("maps_url") or matched_data.get("link") or payload.get("maps_url"),
-                "serpapi"
-            ),
+            name=MetricValue(matched_data.get("title") or matched_data.get("name") or payload.get("name"), "serpapi"),
+            category=MetricValue(matched_data.get("type") or payload.get("category", "Local Business"), "serpapi"),
+            locality=MetricValue(locality, "input"),
+            city=MetricValue(city, "input"),
+            country=MetricValue(country, "input"),
+            phone=MetricValue(matched_data.get("phone") or payload.get("phone"), "serpapi"),
+            website=MetricValue(matched_data.get("website") or website, "serpapi"),
+            maps_url=MetricValue(matched_data.get("maps_url") or matched_data.get("link") or payload.get("maps_url"), "serpapi"),
             rating=MetricValue(matched_data.get("rating"), "serpapi"),
-            review_count=MetricValue(matched_data.get("reviews"), "serpapi"),
+            review_count=MetricValue(matched_data.get("reviews") or matched_data.get("review_count"), "serpapi"),
             competitors=competitors,
-            has_local_schema=MetricValue(web_res.get("has_local_schema") if web_res else False, "crawler"),
-            is_https=MetricValue(web_res.get("is_https") if web_res else False, "crawler"),
-            page_load_ms=MetricValue(web_res.get("page_load_ms") if web_res else None, "crawler")
+            has_local_schema=MetricValue((web_res or {}).get("has_local_schema"), "crawler"),
+            is_https=MetricValue((web_res or {}).get("is_https"), "crawler"),
+            page_load_ms=MetricValue((web_res or {}).get("page_load_ms"), "crawler")
         )
 
         record_dict = record.to_dict()
-        print(f"✓ Business verified: {record_dict['name']} ({record_dict['review_count']} reviews, {record_dict['rating']} rating)")
 
-        # Step 3: Evidence-First AI Analysis with Failover
-        print("🤖 Generating AI-powered insights...")
         ai_insights = None
-        
         if self.gemini_key:
             try:
-                ai_insights = await self.gemini.generate_analysis(
-                    record_dict,
-                    self.prompts["audit_prompt"],
-                    payload.get("language", "English")
-                )
+                ai_insights = await self.gemini.generate_analysis(record_dict, self.prompts["audit_prompt"], payload.get("language", "English"))
                 print("✓ Analysis powered by Google Gemini")
             except Exception as e:
-                print(f"⚠ Gemini failed: {e}. Trying Groq...")
+                print(f"⚠ Gemini failed: {e}")
         
         if not ai_insights and self.groq_key:
             try:
-                ai_insights = await self.groq.generate_analysis(
-                    record_dict,
-                    self.prompts["audit_prompt"],
-                    payload.get("language", "English")
-                )
+                ai_insights = await self.groq.generate_analysis(record_dict, self.prompts["audit_prompt"], payload.get("language", "English"))
                 print("✓ Analysis powered by Groq")
             except Exception as e:
                 print(f"⚠ Groq failed: {e}")
-        
-        if not ai_insights:
-            raise RuntimeError(
-                "Failed to generate AI analysis. Check your API keys and quotas."
-            )
 
-        # Step 4: Generate Charts
-        print("📊 Generating performance charts...")
+        if not ai_insights:
+            raise RuntimeError("Failed to generate AI analysis. Check API keys and quotas.")
+
         gbp_score = ai_insights.get("gbp_score", 50)
         chart_urls = {
             "gauge": QuickChartGenerator.generate_gbp_gauge(int(gbp_score)),
-            "competitor": QuickChartGenerator.generate_competitor_chart(
-                record_dict.get("review_count") or 0,
-                record_dict.get("competitors", [])
-            )
+            "competitor": QuickChartGenerator.generate_competitor_chart(record_dict.get("review_count") or 0, record_dict.get("competitors", []))
         }
 
-        # Step 5: PDF Generation
-        print("📄 Building executive PDF report...")
         os.makedirs("reports_out", exist_ok=True)
-        pdf_path = f"reports_out/{payload['name'].replace(' ', '_')}_Local_SEO_Audit_{payload['city'].replace(' ', '_')}.pdf"
+        safe_name = name.replace(" ", "_").replace("/", "_")
+        safe_city = city.replace(" ", "_").replace("/", "_")
+        pdf_path = f"reports_out/{safe_name}_Local_SEO_Audit_{safe_city}.pdf"
         PDFReportGenerator.build_pdf(record_dict, ai_insights, chart_urls, pdf_path, language=payload.get("language", "English"))
-        
-        print(f"✓ Report generated: {pdf_path}")
         return pdf_path, record_dict
