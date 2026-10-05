@@ -4,7 +4,6 @@ ReportLab PDF Styling & Typography
 """
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
-from reportlab.lib.units import pt
 
 
 def get_report_styles(language: str = "English") -> dict:
