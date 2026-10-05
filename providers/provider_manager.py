@@ -3,6 +3,7 @@ providers/provider_manager.py
 Orchestrates API calls, cache checks, and fallback logic
 """
 from typing import Dict, Any, Optional
+
 from core.cache import SQLiteCache
 from providers.serpapi import SerpApiProvider
 from providers.website import WebsiteCrawlerProvider
@@ -33,9 +34,9 @@ class ProviderManager:
                 "is_https": False,
                 "has_local_schema": False,
                 "page_load_ms": 0,
-                "status_code": 0
+                "status_code": 0,
             }
-        
+
         cache_key = f"web_crawl_{url}"
         cached = self.cache.get(cache_key)
         if cached:

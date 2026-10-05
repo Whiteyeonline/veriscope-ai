@@ -1,200 +1,125 @@
 """
 app.py
 Streamlit Web Application Entrypoint
+Production-ready local SEO audit SaaS
 """
 import os
 import asyncio
-import sys
-
 import streamlit as st
-from dotenv import load_dotenv
 
 from core.orchestrator import AuditOrchestrator
 from identity.business_matcher import IdentityResolutionError
 
-# Load environment variables
-load_dotenv()
 
 st.set_page_config(
     page_title="Local SEO Audit Engine",
     page_icon="🔍",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Sidebar with API Key status
+
+def get_secret(name: str) -> str:
+    """Read a secret from Streamlit or environment variables."""
+    try:
+        value = st.secrets.get(name, "")
+        if value:
+            return str(value)
+    except Exception:
+        pass
+    return os.environ.get(name, "")
+
+
 with st.sidebar:
-    st.title("🔧 Configuration")
-    st.info(
-        "This is a production Local SEO audit tool. "
-        "Your API keys are required to generate accurate reports."
-    )
-    
-    # Check for API keys
-    serpapi_key = os.getenv("SERPAPI_API_KEY", "")
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
-    groq_key = os.getenv("GROQ_API_KEY", "")
-    
+    st.title("⚙️ Configuration")
+    st.info("Professional Local SEO Audit Tool. Keep API keys only in Streamlit Secrets.")
+
+    serpapi_key = get_secret("SERPAPI_API_KEY")
+    gemini_key = get_secret("GEMINI_API_KEY")
+    groq_key = get_secret("GROQ_API_KEY")
+
     st.subheader("API Status")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
-        if serpapi_key:
-            st.success("✓ SerpAPI")
-        else:
-            st.error("✗ SerpAPI Key Missing")
+        st.success("✓ SerpAPI") if serpapi_key else st.error("✗ SerpAPI")
     with col2:
-        if gemini_key or groq_key:
-            st.success("✓ AI Provider")
-        else:
-            st.error("✗ AI Key Missing")
-    
-    st.divider()
-    
-    st.subheader("Setup Guide")
-    with st.expander("Get API Keys (Free Tier)"):
-        st.markdown("""
-        ### SerpAPI (Required)
-        - Visit: https://serpapi.com
-        - Free tier: 100 searches/month
-        - Add to `.env`: `SERPAPI_API_KEY=your_key`
-        
-        ### Google Gemini (Recommended)
-        - Visit: https://ai.google.dev
-        - Free tier: Generous quotas
-        - Add to `.env`: `GEMINI_API_KEY=your_key`
-        
-        ### Groq (Fallback)
-        - Visit: https://console.groq.com
-        - Free tier: Fast inference
-        - Add to `.env`: `GROQ_API_KEY=your_key`
-        """)
-    
-    if st.button("🔄 Reload Configuration", use_container_width=True):
-        st.rerun()
+        st.success("✓ Gemini") if gemini_key else st.info("- Gemini")
+    with col3:
+        st.success("✓ Groq") if groq_key else st.info("- Groq")
+
+    if not serpapi_key or not (gemini_key or groq_key):
+        st.warning("⚠️ Add the keys under Streamlit Cloud → Manage app → Secrets")
+        st.code(
+            """SERPAPI_API_KEY = \"your_serpapi_key\"
+GEMINI_API_KEY = \"your_gemini_key\"
+GROQ_API_KEY = \"your_groq_key\"""",
+            language="toml",
+        )
 
 st.title("🔍 Professional Local SEO & GBP Audit Engine")
 st.caption("Generate production-grade executive PDF audits with real Google Maps data and AI-powered insights.")
 
-# Main form
 with st.form("audit_form"):
-    st.subheader("Business Information")
-    
+    st.subheader("📋 Business Information")
+
     col1, col2 = st.columns(2)
     with col1:
-        name = st.text_input(
-            "Business Name*",
-            value="ABC Dental Clinic",
-            help="Full legal business name"
-        )
-        category = st.text_input(
-            "Business Category*",
-            value="Dentist",
-            help="e.g., Dentist, Pizza Restaurant, Hair Salon"
-        )
-        locality = st.text_input(
-            "Locality/Neighborhood",
-            value="Muvattupuzha",
-            help="Specific area (optional, improves accuracy)"
-        )
-        city = st.text_input(
-            "City*",
-            value="Kollam",
-            help="City where business operates"
-        )
-    
+        name = st.text_input("Business Name *", value="", placeholder="e.g., McDonald's")
+        category = st.text_input("Business Category *", value="", placeholder="e.g., Fast Food")
+        locality = st.text_input("Locality / Area", value="", placeholder="e.g., Midtown")
+        city = st.text_input("City *", value="", placeholder="e.g., New York")
+
     with col2:
-        country = st.text_input(
-            "Country*",
-            value="India",
-            help="Country/Region"
-        )
-        primary_kw = st.text_input(
-            "Primary Local Keyword*",
-            value="dentist in Muvattupuzha",
-            help="How customers search for your business"
-        )
-        website = st.text_input(
-            "Website URL",
-            value="https://example.com",
-            help="Business website (optional)"
-        )
-        maps_url = st.text_input(
-            "Google Maps URL",
-            value="",
-            help="Direct link to Google Business profile (helps verify exact location)"
-        )
-    
-    language = st.selectbox(
-        "Report Language",
-        ["English", "Malayalam"],
-        help="PDF report language"
-    )
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        submit = st.form_submit_button("🚀 GENERATE AUDIT", use_container_width=True)
-    with col2:
-        st.form_submit_button("📋 Clear Form", use_container_width=True, on_click=lambda: None)
-    with col3:
-        st.form_submit_button("ℹ️ Example Report", use_container_width=True, on_click=lambda: None)
+        country = st.text_input("Country *", value="United States", placeholder="e.g., United States")
+        primary_kw = st.text_input("Search Keyword *", value="", placeholder="e.g., McDonald's near me")
+        website = st.text_input("Website URL", value="", placeholder="https://example.com (optional)")
+        maps_url = st.text_input("Google Maps URL", value="", placeholder="https://maps.google.com/... (optional)")
+
+    language = st.selectbox("Report Language", ["English", "Malayalam"])
+    submit = st.form_submit_button("🚀 GENERATE AUDIT", use_container_width=True)
 
 if submit:
-    # Validate inputs
-    if not name or not city or not primary_kw:
-        st.error("❌ Please fill in all required fields marked with *")
+    if not name or not city or not country or not primary_kw:
+        st.error("❌ Please fill in all required fields (marked with *).")
         st.stop()
-    
-    # Validate API keys
-    serpapi_key = os.getenv("SERPAPI_API_KEY", "")
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
-    groq_key = os.getenv("GROQ_API_KEY", "")
-    
+
+    serpapi_key = get_secret("SERPAPI_API_KEY")
+    gemini_key = get_secret("GEMINI_API_KEY")
+    groq_key = get_secret("GROQ_API_KEY")
+
     if not serpapi_key:
-        st.error(
-            "❌ **SERPAPI_API_KEY is required.**\n\n"
-            "This tool generates reports using real Google Maps data. "
-            "Please set your SerpAPI key in the `.env` file or environment variables. "
-            "[Get a free key](https://serpapi.com)"
-        )
+        st.error("❌ SERPAPI_API_KEY is missing in Streamlit Secrets.")
         st.stop()
-    
+
     if not (gemini_key or groq_key):
-        st.error(
-            "❌ **At least one AI provider key is required.**\n\n"
-            "Set GEMINI_API_KEY or GROQ_API_KEY in `.env`. "
-            "[Get free keys](https://ai.google.dev) or [Groq](https://console.groq.com)"
-        )
+        st.error("❌ Add at least one AI key: GEMINI_API_KEY or GROQ_API_KEY.")
         st.stop()
-    
+
     payload = {
-        "name": name,
-        "category": category,
-        "locality": locality,
-        "city": city,
-        "country": country,
-        "primary_keyword": primary_kw,
-        "website": website,
-        "maps_url": maps_url,
+        "name": name.strip(),
+        "category": category.strip() or "Local Business",
+        "locality": locality.strip() or "",
+        "city": city.strip(),
+        "country": country.strip(),
+        "primary_keyword": primary_kw.strip(),
+        "website": website.strip() or "",
+        "maps_url": maps_url.strip() or "",
         "language": language,
-        "phone": ""
+        "phone": "",
     }
 
     orchestrator = AuditOrchestrator(
         serpapi_key=serpapi_key,
         gemini_key=gemini_key,
-        groq_key=groq_key
+        groq_key=groq_key,
     )
 
-    with st.status("🔄 Generating Your Audit...", expanded=True) as status:
+    with st.status("🔄 Generating your audit...", expanded=True) as status:
         try:
-            # Run async orchestration
             pdf_path, record = asyncio.run(orchestrator.execute_audit(payload))
-            
-            status.update(label="✅ Audit Completed Successfully!", state="complete")
-            
-            # Provide download button
-            st.success("Your professional PDF report is ready!")
-            
+            status.update(label="✅ Audit completed successfully!", state="complete")
+
+            st.success("✨ Your professional PDF report is ready!")
             with open(pdf_path, "rb") as f:
                 st.download_button(
                     label="📥 DOWNLOAD EXECUTIVE PDF REPORT",
@@ -202,64 +127,51 @@ if submit:
                     file_name=os.path.basename(pdf_path),
                     mime="application/pdf",
                     use_container_width=True,
-                    key="pdf_download"
+                    key="pdf_download",
                 )
-            
-            # Show key findings
+
             with st.expander("📊 Quick Insights", expanded=True):
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric(
-                        "Rating",
-                        f"{record.get('rating', 'N/A')}/5.0" if record.get('rating') else "No rating"
-                    )
+                    rating = record.get("rating")
+                    st.metric("Rating", f"{rating}/5.0" if rating else "N/A")
                 with col2:
-                    st.metric(
-                        "Reviews",
-                        record.get('review_count', 0) or 0
-                    )
+                    reviews = record.get("review_count") or 0
+                    st.metric("Reviews", int(reviews))
                 with col3:
-                    st.metric(
-                        "Website",
-                        "✓ Present" if record.get('website') else "✗ Missing"
-                    )
-                
+                    st.metric("Website", "✓ Listed" if record.get("website") else "✗ Missing")
+
                 st.write(f"**Business:** {record.get('name')}")
                 st.write(f"**Location:** {record.get('city')}, {record.get('country')}")
                 st.write(f"**Category:** {record.get('category')}")
-        
+
         except RuntimeError as e:
-            status.update(label="❌ Configuration Error", state="error")
+            status.update(label="⚠️ Configuration or API Error", state="error")
             st.error(f"**Setup Required:** {str(e)}")
+        except ValueError as e:
+            status.update(label="⚠️ Input Error", state="error")
+            st.error(f"**Invalid Input:** {str(e)}")
         except IdentityResolutionError as e:
-            status.update(label="⚠️ Verification Issue", state="error")
-            st.warning(
-                f"**Could not verify business:**\n\n{str(e)}\n\n"
-                "Try providing a Google Maps URL or being more specific with the business name."
-            )
+            status.update(label="⚠️ Verification issue", state="error")
+            st.warning(f"**Could not verify business**: {str(e)}")
         except Exception as e:
             status.update(label="❌ Error", state="error")
             st.error(f"**Error during audit:** {str(e)}")
-            if "quota" in str(e).lower():
-                st.info("💡 You've hit your API quota. Upgrade your plan or try again later.")
 
 st.divider()
-
 with st.expander("❓ FAQ"):
-    st.markdown("""
-    **Q: Why do I need API keys?**
-    A: This tool pulls real data from Google Maps and uses AI for analysis. 
-    API keys are free and we recommend starting with the free tier.
-    
-    **Q: How accurate is the report?**
-    A: Reports use live Google Maps data, website crawl results, and AI-powered analysis. 
-    Accuracy depends on data completeness in Google Business Profile.
-    
-    **Q: Can I use this without API keys?**
-    A: No, this is a professional tool that requires live data. 
-    A demo version with fallback data is available on request.
-    
-    **Q: How much does this cost?**
-    A: Most costs come from SerpAPI (100 free searches/month). 
-    AI providers offer free tier quotas suitable for getting started.
-    """)
+    st.markdown(
+        """
+        **Q: Why do I need API keys?**
+        A: Google Maps and AI analysis require live API access.
+
+        **Q: Are my keys safe?**
+        A: Yes. Keep them only in Streamlit Secrets and never commit them to GitHub.
+
+        **Q: Can the app work without a website?**
+        A: Yes. It will still create the report and mark the website as missing.
+
+        **Q: What business should I test first?**
+        A: Use a famous local business like McDonald's or Starbucks, with city + country.
+        """
+    )

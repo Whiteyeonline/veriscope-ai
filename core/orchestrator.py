@@ -5,14 +5,14 @@ Asynchronous Audit Orchestrator coordinating the complete pipeline
 import asyncio
 import json
 import os
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, Tuple
 
-from core.models import BusinessRecord, MetricValue, CompetitorRecord
-from identity.business_matcher import BusinessMatcher, IdentityResolutionError
-from providers.provider_manager import ProviderManager
 from analysis.gemini import GeminiEngine
 from analysis.groq_fallback import GroqEngine
 from charts.quickchart import QuickChartGenerator
+from core.models import BusinessRecord, CompetitorRecord, MetricValue
+from identity.business_matcher import BusinessMatcher, IdentityResolutionError
+from providers.provider_manager import ProviderManager
 from reports.pdf import PDFReportGenerator
 
 
@@ -31,16 +31,16 @@ class AuditOrchestrator:
         except FileNotFoundError:
             self.prompts = {
                 "system_instruction": "You are a senior Local SEO analyst.",
-                "audit_prompt": "Analyze this business data: {evidence_json}\n\nReturn JSON with gbp_score, executive_summary, findings, and action_plan in {language}."
+                "audit_prompt": "Analyze this business data: {evidence_json}\n\nReturn JSON with gbp_score, executive_summary, findings, and action_plan in {language}.",
             }
 
     async def execute_audit(self, payload: Dict[str, str]) -> Tuple[str, Dict[str, Any]]:
         if not self.serpapi_key:
             raise RuntimeError("SERPAPI_API_KEY is required to generate accurate local SEO reports.")
-        
+
         if not self.gemini_key and not self.groq_key:
-            raise RuntimeError("At least one AI provider key is required.")
-        
+            raise RuntimeError("At least one AI provider key is required: GEMINI_API_KEY or GROQ_API_KEY.")
+
         name = (payload.get("name") or "").strip()
         city = (payload.get("city") or "").strip()
         country = (payload.get("country") or "").strip()
@@ -49,15 +49,12 @@ class AuditOrchestrator:
 
         if not name or not city or not country:
             raise ValueError("Business name, city, and country are required.")
-        
-        # Build query carefully for SerpAPI
-        query_parts = [name]
-        if locality:
-            query_parts.append(locality)
-        query = " ".join(query_parts)
+
+        query = name if not locality else f"{name} {locality}"
         location = f"{city}, {country}"
 
         print(f"\n🔍 Searching for: {query} in {location}")
+
         serp_task = self.pm.search_local_business(query, location)
         web_task = self.pm.crawl_website(website)
         serp_res, web_res = await asyncio.gather(serp_task, web_task)
@@ -68,10 +65,10 @@ class AuditOrchestrator:
 
         try:
             matched_data, confidence = BusinessMatcher.verify_identity(payload, candidates)
-            print(f"✓ Matched with {confidence*100:.0f}% confidence")
+            print(f"✓ Matched with {confidence * 100:.0f}% confidence")
         except IdentityResolutionError:
             matched_data = candidates[0]
-            print("⚠ Using first local result as fallback due to low-confidence match.")
+            print("⚠ Using first result as fallback due to low-confidence identity match.")
 
         competitors = []
         for i, candidate in enumerate(candidates):
@@ -81,10 +78,10 @@ class AuditOrchestrator:
                 break
             competitors.append(
                 CompetitorRecord(
-                    name=candidate.get("title") or candidate.get("name") or f"Competitor {i+1}",
+                    name=candidate.get("title") or candidate.get("name") or f"Competitor {i + 1}",
                     position=i + 1,
                     rating=candidate.get("rating"),
-                    review_count=candidate.get("reviews") or candidate.get("review_count")
+                    review_count=candidate.get("reviews") or candidate.get("review_count"),
                 )
             )
 
@@ -102,7 +99,7 @@ class AuditOrchestrator:
             competitors=competitors,
             has_local_schema=MetricValue((web_res or {}).get("has_local_schema"), "crawler"),
             is_https=MetricValue((web_res or {}).get("is_https"), "crawler"),
-            page_load_ms=MetricValue((web_res or {}).get("page_load_ms"), "crawler")
+            page_load_ms=MetricValue((web_res or {}).get("page_load_ms"), "crawler"),
         )
 
         record_dict = record.to_dict()
@@ -110,30 +107,47 @@ class AuditOrchestrator:
         ai_insights = None
         if self.gemini_key:
             try:
-                ai_insights = await self.gemini.generate_analysis(record_dict, self.prompts["audit_prompt"], payload.get("language", "English"))
+                ai_insights = await self.gemini.generate_analysis(
+                    record_dict,
+                    self.prompts["audit_prompt"],
+                    payload.get("language", "English"),
+                )
                 print("✓ Analysis powered by Google Gemini")
-            except Exception as e:
-                print(f"⚠ Gemini failed: {e}")
-        
+            except Exception as exc:
+                print(f"⚠ Gemini failed: {exc}")
+
         if not ai_insights and self.groq_key:
             try:
-                ai_insights = await self.groq.generate_analysis(record_dict, self.prompts["audit_prompt"], payload.get("language", "English"))
+                ai_insights = await self.groq.generate_analysis(
+                    record_dict,
+                    self.prompts["audit_prompt"],
+                    payload.get("language", "English"),
+                )
                 print("✓ Analysis powered by Groq")
-            except Exception as e:
-                print(f"⚠ Groq failed: {e}")
+            except Exception as exc:
+                print(f"⚠ Groq failed: {exc}")
 
         if not ai_insights:
-            raise RuntimeError("Failed to generate AI analysis. Check API keys and quotas.")
+            raise RuntimeError("Failed to generate AI analysis. Check your API keys and usage quotas.")
 
         gbp_score = ai_insights.get("gbp_score", 50)
         chart_urls = {
             "gauge": QuickChartGenerator.generate_gbp_gauge(int(gbp_score)),
-            "competitor": QuickChartGenerator.generate_competitor_chart(record_dict.get("review_count") or 0, record_dict.get("competitors", []))
+            "competitor": QuickChartGenerator.generate_competitor_chart(
+                record_dict.get("review_count") or 0,
+                record_dict.get("competitors", []),
+            ),
         }
 
         os.makedirs("reports_out", exist_ok=True)
         safe_name = name.replace(" ", "_").replace("/", "_")
         safe_city = city.replace(" ", "_").replace("/", "_")
         pdf_path = f"reports_out/{safe_name}_Local_SEO_Audit_{safe_city}.pdf"
-        PDFReportGenerator.build_pdf(record_dict, ai_insights, chart_urls, pdf_path, language=payload.get("language", "English"))
+        PDFReportGenerator.build_pdf(
+            record_dict,
+            ai_insights,
+            chart_urls,
+            pdf_path,
+            language=payload.get("language", "English"),
+        )
         return pdf_path, record_dict
